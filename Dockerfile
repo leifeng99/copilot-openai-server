@@ -24,10 +24,6 @@ RUN npm install -g @github/copilot
 # Copy the built binary from builder stage
 COPY --from=builder /app/copilot-server /usr/local/bin/copilot-server
 
-# Set environment variable for GitHub token
-# User should provide their personal access token
-ENV GH_TOKEN=""
-
 # Expose port
 EXPOSE 8080
 

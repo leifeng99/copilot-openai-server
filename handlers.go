@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -24,7 +25,7 @@ func NewServer() (*Server, error) {
 		LogLevel: "error",
 	})
 
-	if err := client.Start(); err != nil {
+	if err := client.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start copilot client: %w", err)
 	}
 
@@ -43,7 +44,7 @@ func (s *Server) HandleModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	models, err := s.client.ListModels()
+	models, err := s.client.ListModels(r.Context())
 	if err != nil {
 		log.Printf("Error listing models: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to list models", "api_error")
@@ -160,7 +161,7 @@ func (s *Server) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session
-	session, err := s.client.CreateSession(sessionConfig)
+	session, err := s.client.CreateSession(r.Context(), sessionConfig)
 	if err != nil {
 		log.Printf("[ERROR] Creating session failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create session", "api_error")
@@ -174,15 +175,15 @@ func (s *Server) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	if req.Stream {
 		log.Printf("[DEBUG] Starting streaming response")
-		s.handleStreamingResponse(w, session, prompt, req.Model)
+		s.handleStreamingResponse(r.Context(), w, session, prompt, req.Model)
 	} else {
 		log.Printf("[DEBUG] Starting non-streaming response")
-		s.handleNonStreamingResponse(w, session, prompt, req.Model)
+		s.handleNonStreamingResponse(r.Context(), w, session, prompt, req.Model)
 	}
 }
 
 // handleNonStreamingResponse handles non-streaming chat completions
-func (s *Server) handleNonStreamingResponse(w http.ResponseWriter, session *copilot.Session, prompt, model string) {
+func (s *Server) handleNonStreamingResponse(ctx context.Context, w http.ResponseWriter, session *copilot.Session, prompt, model string) {
 	var contentBuilder strings.Builder
 	var toolCalls []ToolCall
 	var finishReason string = "stop"
@@ -225,7 +226,7 @@ func (s *Server) handleNonStreamingResponse(w http.ResponseWriter, session *copi
 	})
 
 	// Send the message
-	_, err := session.Send(copilot.MessageOptions{
+	_, err := session.Send(ctx, copilot.MessageOptions{
 		Prompt: prompt,
 	})
 	if err != nil {
@@ -237,6 +238,9 @@ func (s *Server) handleNonStreamingResponse(w http.ResponseWriter, session *copi
 	// Wait for completion with timeout
 	select {
 	case <-done:
+	case <-ctx.Done():
+		log.Printf("Request canceled: %v", ctx.Err())
+		return
 	case <-time.After(5 * time.Minute):
 		log.Printf("Request timed out")
 		writeError(w, http.StatusGatewayTimeout, "Request timed out", "api_error")
@@ -266,7 +270,7 @@ func (s *Server) handleNonStreamingResponse(w http.ResponseWriter, session *copi
 }
 
 // handleStreamingResponse handles streaming chat completions with SSE
-func (s *Server) handleStreamingResponse(w http.ResponseWriter, session *copilot.Session, prompt, model string) {
+func (s *Server) handleStreamingResponse(ctx context.Context, w http.ResponseWriter, session *copilot.Session, prompt, model string) {
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -384,7 +388,7 @@ func (s *Server) handleStreamingResponse(w http.ResponseWriter, session *copilot
 	})
 
 	// Send the message
-	_, err := session.Send(copilot.MessageOptions{
+	_, err := session.Send(ctx, copilot.MessageOptions{
 		Prompt: prompt,
 	})
 	if err != nil {
@@ -395,6 +399,9 @@ func (s *Server) handleStreamingResponse(w http.ResponseWriter, session *copilot
 	// Wait for completion
 	select {
 	case <-done:
+	case <-ctx.Done():
+		log.Printf("Streaming request canceled: %v", ctx.Err())
+		return
 	case <-time.After(5 * time.Minute):
 		log.Printf("Streaming request timed out")
 		return

@@ -1,6 +1,6 @@
 module copilot-openai-server
 
-go 1.23.0
+go 1.24
 
 require github.com/github/copilot-sdk/go v0.1.32
 
