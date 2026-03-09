@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -120,9 +121,10 @@ func (s *Server) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// Create session config
 	sessionConfig := &copilot.SessionConfig{
-		Model:     req.Model,
-		Streaming: req.Stream,
-		Tools:     copilotTools,
+		Model:               req.Model,
+		Streaming:           req.Stream,
+		Tools:               copilotTools,
+		OnPermissionRequest: denyPermissionRequests,
 		// Disable infinite sessions for simple request/response
 		InfiniteSessions: &copilot.InfiniteSessionConfig{
 			Enabled: copilot.Bool(false),
@@ -180,6 +182,13 @@ func (s *Server) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[DEBUG] Starting non-streaming response")
 		s.handleNonStreamingResponse(r.Context(), w, session, prompt, req.Model)
 	}
+}
+
+func denyPermissionRequests(request copilot.PermissionRequest, invocation copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+	log.Printf("[WARN] Denying permission request for session %s: %+v", invocation.SessionID, request)
+	return copilot.PermissionRequestResult{
+		Kind: copilot.PermissionRequestResultKindDeniedCouldNotRequestFromUser,
+	}, errors.New("interactive permission requests are disabled for this server")
 }
 
 // handleNonStreamingResponse handles non-streaming chat completions
